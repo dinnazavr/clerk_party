@@ -39,4 +39,6 @@ font_large = pygame.font.SysFont("Arial", 32)
 # Добавим константы для инвентаря
 INVENTORY_HEIGHT = 80  # Высота панели инвентаря
 INVENTORY_COLOR = (50, 50, 70)  # Цвет фона инвентаря
-ITEM_SIZE = 50  # Размер предметов
+ITEM_SIZE = 40 # Размер предметов
+INVENTORY_ITEM_SIZE = 40  # Размер предметов в инвентаре
+INVENTORY_PANEL_HEIGHT = 50  # Высота панели инвентаря

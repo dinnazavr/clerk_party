@@ -6,6 +6,7 @@ from entities.npc import NPC
 from entities.item import Item
 from ui.inventory import InventoryUI
 
+
 def generate_npcs(count, player):
     npcs = []
     occupied_areas = [player.rect.copy()]  # Начинаем с области игрока
@@ -16,7 +17,9 @@ def generate_npcs(count, player):
 
         while attempts < 1000 and not placed:
             x = random.randint(0, SCREEN_WIDTH - 30)
-            y = random.randint(INVENTORY_HEIGHT + 10, SCREEN_HEIGHT - 50)  # Учитываем инвентарь
+            y = random.randint(
+                INVENTORY_HEIGHT + 10, SCREEN_HEIGHT - 50
+            )  # Учитываем инвентарь
             new_rect = pygame.Rect(x, y, 30, 50)
 
             # Проверяем отступы от других объектов
@@ -58,14 +61,14 @@ def generate_npcs(count, player):
 
     return npcs
 
+
 def generate_items(count, player, npcs):
     items = []
-    occupied_areas = [player.rect.copy()]
-    
-    # Добавляем зону инвентаря как запретную зону
-    inventory_area = pygame.Rect(0, 0, SCREEN_WIDTH, INVENTORY_HEIGHT)
-    occupied_areas.append(inventory_area)
-    
+    occupied_areas = [
+        player.rect.copy(),
+        pygame.Rect(0, 0, SCREEN_WIDTH, INVENTORY_HEIGHT),
+    ]
+
     # Добавляем NPC в занятые области
     for npc in npcs:
         occupied_areas.append(npc.rect)
@@ -119,37 +122,78 @@ def generate_items(count, player, npcs):
 
     return items
 
+
 def game_loop(screen, selected_personality):
-    # Инициализация интерфейса инвентаря
-    inventory_ui = InventoryUI()
-    
-    # Создание игрока
+    # Загрузка иконки инвентаря
+    try:
+        inventory_icon = pygame.image.load("images/inventory_icon.png").convert_alpha()
+        inventory_icon = pygame.transform.scale(inventory_icon, (40, 40))
+    except:
+        inventory_icon = pygame.Surface((40, 40))
+        inventory_icon.fill((150, 150, 200))
+
+    inventory_icon_rect = inventory_icon.get_rect(topleft=(10, 10))
+
+    # Инициализация игровых объектов
     player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-    
-    # Генерация NPC и предметов
     npcs = generate_npcs(15, player)
     items = generate_items(5, player, npcs)
-    
+
     # Группы спрайтов
     all_sprites = pygame.sprite.Group(player, *npcs, *items)
     npc_group = pygame.sprite.Group(*npcs)
     item_group = pygame.sprite.Group(*items)
-    
+
+    # Инициализация инвентаря
+    inventory_ui = InventoryUI(inventory_icon_rect.width)
+    inventory_open = False
+
     clock = pygame.time.Clock()
     running = True
 
     while running:
-        # Обработка событий
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_click = False
+        
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    running = False
+                    return "menu"
+                if event.key == pygame.K_i:
+                    inventory_open = not inventory_open
+                    inventory_ui.visible = inventory_open
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    mouse_click = True
+                    # Проверяем клик именно по иконке инвентаря
+                    if inventory_icon_rect.collidepoint(event.pos):
+                        inventory_open = not inventory_open
+                        inventory_ui.visible = inventory_open
+            
+            # Обработка перетаскивания только при открытом инвентаре
+            if inventory_open:
+                handled = inventory_ui.handle_events(
+                    event, 
+                    player.inventory, 
+                    player, 
+                    all_sprites,
+                    npc_group,
+                    item_group,
+                    SCREEN_WIDTH,
+                    SCREEN_HEIGHT
+                )
+                if handled:
+                    continue
 
         # Обновление игрока
         keys = pygame.key.get_pressed()
         player.update(keys)
+        if player.rect.top < INVENTORY_PANEL_HEIGHT:
+            player.rect.top = INVENTORY_PANEL_HEIGHT
 
         # Проверка столкновений с NPC
         for npc in npcs:
@@ -157,19 +201,32 @@ def game_loop(screen, selected_personality):
                 player.rect.x = player.prev_x
                 player.rect.y = player.prev_y
 
-        # Проверка сбора предметов
-        collected_items = pygame.sprite.spritecollide(player, item_group, True)
+        # Сбор предметов (кроме перетаскиваемых)
+        collected_items = pygame.sprite.spritecollide(player, item_group, False)
         for item in collected_items:
-            player.collect_item(item)
+            if not getattr(item, 'dragging', False):
+                player.collect_item(item)
+                item.kill()
 
         # Отрисовка
         screen.fill(WHITE)
         
-        # Рисуем игровые объекты
-        all_sprites.draw(screen)
+        # Рисуем игровые объекты (кроме перетаскиваемого)
+        for sprite in all_sprites:
+            if not (isinstance(sprite, Item) and getattr(sprite, 'dragging', False)):
+                screen.blit(sprite.image, sprite.rect)
         
-        # Рисуем инвентарь поверх всего
-        inventory_ui.draw(screen, player.inventory)
+        # Рисуем перетаскиваемый предмет с проверкой границ
+        if hasattr(inventory_ui, 'dragged_item') and inventory_ui.dragged_item:
+            dragged_item = inventory_ui.dragged_item
+            dragged_item.rect.x = max(0, min(dragged_item.rect.x, SCREEN_WIDTH - dragged_item.rect.width))
+            dragged_item.rect.y = max(INVENTORY_PANEL_HEIGHT, min(dragged_item.rect.y, SCREEN_HEIGHT - dragged_item.rect.height))
+            screen.blit(dragged_item.image, dragged_item.rect)
+        
+        # Рисуем интерфейс
+        screen.blit(inventory_icon, inventory_icon_rect)
+        if inventory_open:
+            inventory_ui.draw(screen, player.inventory, inventory_icon_rect.right + 10, inventory_icon_rect.top)
 
         pygame.display.flip()
         clock.tick(60)
