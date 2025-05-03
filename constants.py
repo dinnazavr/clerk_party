@@ -42,3 +42,8 @@ INVENTORY_COLOR = (50, 50, 70)  # Цвет фона инвентаря
 ITEM_SIZE = 40 # Размер предметов
 INVENTORY_ITEM_SIZE = 40  # Размер предметов в инвентаре
 INVENTORY_PANEL_HEIGHT = 50  # Высота панели инвентаря
+
+DIALOGUE_RADIUS = 55  # Радиус взаимодействия с NPC
+DIALOGUE_BG_COLOR = (40, 40, 50, 220)  # Цвет фона диалога
+DIALOGUE_TEXT_COLOR = (255, 255, 255)  # Цвет текста
+DEBUG_MODE = False  # Для отображения зон взаимодействия

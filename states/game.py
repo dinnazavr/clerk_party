@@ -5,6 +5,7 @@ from entities.player import Player
 from entities.npc import NPC
 from entities.item import Item
 from ui.inventory import InventoryUI
+from systems.dialogue import DialogueSystem
 
 
 def generate_npcs(count, player):
@@ -17,20 +18,19 @@ def generate_npcs(count, player):
 
         while attempts < 1000 and not placed:
             x = random.randint(0, SCREEN_WIDTH - 30)
-            y = random.randint(
-                INVENTORY_HEIGHT + 10, SCREEN_HEIGHT - 50
-            )  # Учитываем инвентарь
+            y = random.randint(INVENTORY_HEIGHT + 10, SCREEN_HEIGHT - 50)
             new_rect = pygame.Rect(x, y, 30, 50)
 
             # Проверяем отступы от других объектов
             collision = False
             for area in occupied_areas:
-                if new_rect.colliderect(area.inflate(10, 10)):  # Добавляем отступы
+                if new_rect.colliderect(area.inflate(10, 10)):
                     collision = True
                     break
 
             if not collision:
-                npc = NPC(x, y, i)
+                personality_id = (i % 16) + 1  # 16 типов личности
+                npc = NPC(x, y, i, personality_id)  # Создаем NPC с personality_id
                 npcs.append(npc)
                 occupied_areas.append(new_rect)
                 placed = True
@@ -53,7 +53,8 @@ def generate_npcs(count, player):
                         collision = True
                         break
                 if not collision:
-                    npc = NPC(corner[0], corner[1], i)
+                    personality_id = (i % 16) + 1  # 16 типов личности
+                    npc = NPC(corner[0], corner[1], i, personality_id)  # И здесь тоже добавляем personality_id
                     npcs.append(npc)
                     occupied_areas.append(corner_rect)
                     placed = True
@@ -144,39 +145,57 @@ def game_loop(screen, selected_personality):
     npc_group = pygame.sprite.Group(*npcs)
     item_group = pygame.sprite.Group(*items)
 
-    # Инициализация инвентаря
+    # Инициализация систем
     inventory_ui = InventoryUI(inventory_icon_rect.width)
+    dialogue_system = DialogueSystem()
+    
+    # Состояния игры
     inventory_open = False
-
-    clock = pygame.time.Clock()
     running = True
+    clock = pygame.time.Clock()
 
     while running:
-        mouse_pos = pygame.mouse.get_pos()
-        mouse_click = False
-        
+        # Обработка событий
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             
+            # Обработка клавиатуры
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return "menu"
                 if event.key == pygame.K_i:
                     inventory_open = not inventory_open
                     inventory_ui.visible = inventory_open
+                
+                # Обработка диалогов только при нажатии (не зажатии)
+                if event.key == pygame.K_SPACE:
+                    closest_npc = None
+                    min_distance = DIALOGUE_RADIUS  # Используем константу радиуса
+                    
+                    # Находим ближайшего NPC в радиусе взаимодействия
+                    for npc in npcs:
+                        # Рассчитываем расстояние между центрами
+                        distance = ((player.rect.centerx - npc.rect.centerx)**2 + 
+                                  (player.rect.centery - npc.rect.centery)**2)**0.5
+                        
+                        if distance <= min_distance:
+                            min_distance = distance
+                            closest_npc = npc
+                    
+                    # Если нашли NPC для взаимодействия
+                    if closest_npc:
+                        dialogue_system.toggle_dialogue(closest_npc.personality_id)
             
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    mouse_click = True
-                    # Проверяем клик именно по иконке инвентаря
-                    if inventory_icon_rect.collidepoint(event.pos):
-                        inventory_open = not inventory_open
-                        inventory_ui.visible = inventory_open
+            # Обработка кликов мыши
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if inventory_icon_rect.collidepoint(event.pos):
+                    inventory_open = not inventory_open
+                    inventory_ui.visible = inventory_open
             
-            # Обработка перетаскивания только при открытом инвентаре
+            # Обработка инвентаря
             if inventory_open:
-                handled = inventory_ui.handle_events(
+                inventory_ui.handle_events(
                     event, 
                     player.inventory, 
                     player, 
@@ -186,12 +205,16 @@ def game_loop(screen, selected_personality):
                     SCREEN_WIDTH,
                     SCREEN_HEIGHT
                 )
-                if handled:
-                    continue
 
         # Обновление игрока
         keys = pygame.key.get_pressed()
         player.update(keys)
+
+        # Обновление диалоговой системы (проверка расстояния до NPC)
+        dialogue_system.update(player, npcs)
+        
+        
+        # Ограничение движения (не заходить в зону инвентаря)
         if player.rect.top < INVENTORY_PANEL_HEIGHT:
             player.rect.top = INVENTORY_PANEL_HEIGHT
 
@@ -201,7 +224,7 @@ def game_loop(screen, selected_personality):
                 player.rect.x = player.prev_x
                 player.rect.y = player.prev_y
 
-        # Сбор предметов (кроме перетаскиваемых)
+        # Сбор предметов
         collected_items = pygame.sprite.spritecollide(player, item_group, False)
         for item in collected_items:
             if not getattr(item, 'dragging', False):
@@ -211,22 +234,37 @@ def game_loop(screen, selected_personality):
         # Отрисовка
         screen.fill(WHITE)
         
-        # Рисуем игровые объекты (кроме перетаскиваемого)
+        # Рисуем игровой мир
         for sprite in all_sprites:
             if not (isinstance(sprite, Item) and getattr(sprite, 'dragging', False)):
                 screen.blit(sprite.image, sprite.rect)
         
-        # Рисуем перетаскиваемый предмет с проверкой границ
+        # Рисуем перетаскиваемый предмет (если есть)
         if hasattr(inventory_ui, 'dragged_item') and inventory_ui.dragged_item:
             dragged_item = inventory_ui.dragged_item
+            # Ограничиваем позицию в пределах экрана
             dragged_item.rect.x = max(0, min(dragged_item.rect.x, SCREEN_WIDTH - dragged_item.rect.width))
             dragged_item.rect.y = max(INVENTORY_PANEL_HEIGHT, min(dragged_item.rect.y, SCREEN_HEIGHT - dragged_item.rect.height))
             screen.blit(dragged_item.image, dragged_item.rect)
         
+        # Рисуем индикаторы взаимодействия с NPC
+        for npc in npcs:
+            distance = ((player.rect.centerx - npc.rect.centerx)**2 + 
+                       (player.rect.centery - npc.rect.centery)**2)**0.5
+            if distance <= DIALOGUE_RADIUS:
+                # Индикатор доступного диалога
+                pygame.draw.circle(screen, (100, 255, 100), 
+                                 (npc.rect.centerx, npc.rect.top - 15), 8)
+        
         # Рисуем интерфейс
         screen.blit(inventory_icon, inventory_icon_rect)
         if inventory_open:
-            inventory_ui.draw(screen, player.inventory, inventory_icon_rect.right + 10, inventory_icon_rect.top)
+            inventory_ui.draw(screen, player.inventory, 
+                            inventory_icon_rect.right + 10, 
+                            inventory_icon_rect.top)
+        
+        # Рисуем диалоговую систему поверх всего
+        dialogue_system.draw(screen)
 
         pygame.display.flip()
         clock.tick(60)
