@@ -12,6 +12,7 @@ class Player(pygame.sprite.Sprite):
         self.speed = 5
         self.prev_x = x
         self.prev_y = y
+        self.inventory = []  # Список собранных предметов
 
     def update(self, keys):
         self.prev_x = self.rect.x
@@ -29,3 +30,6 @@ class Player(pygame.sprite.Sprite):
         # Жесткое ограничение границ
         self.rect.x = max(0, min(self.rect.x, SCREEN_WIDTH - self.rect.width))
         self.rect.y = max(0, min(self.rect.y, SCREEN_HEIGHT - self.rect.height))
+    def collect_item(self, item):
+        self.inventory.append(item)
+        item.kill()  # Удаляем предмет из игрового мира
