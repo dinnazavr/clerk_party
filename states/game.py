@@ -10,7 +10,7 @@ from systems.dialogue import DialogueSystem
 
 def generate_npcs(count, player):
     npcs = []
-    occupied_areas = [player.rect.copy()]  # Начинаем с области игрока
+    occupied_areas = [player.rect.copy()]
 
     for i in range(count):
         attempts = 0
@@ -21,7 +21,7 @@ def generate_npcs(count, player):
             y = random.randint(INVENTORY_HEIGHT + 10, SCREEN_HEIGHT - 50)
             new_rect = pygame.Rect(x, y, 30, 50)
 
-            # Проверяем отступы от других объектов
+            # Проверка коллизий
             collision = False
             for area in occupied_areas:
                 if new_rect.colliderect(area.inflate(10, 10)):
@@ -29,8 +29,8 @@ def generate_npcs(count, player):
                     break
 
             if not collision:
-                personality_id = (i % 16) + 1  # 16 типов личности
-                npc = NPC(x, y, i, personality_id)  # Создаем NPC с personality_id
+                personality_id = (i % 16) + 1
+                npc = NPC(x, y, i, personality_id)
                 npcs.append(npc)
                 occupied_areas.append(new_rect)
                 placed = True
@@ -38,7 +38,6 @@ def generate_npcs(count, player):
             attempts += 1
 
         if not placed:
-            # Если не удалось найти место, размещаем в углу с проверкой
             corners = [
                 (10, INVENTORY_HEIGHT + 10),
                 (SCREEN_WIDTH - 40, INVENTORY_HEIGHT + 10),
@@ -53,8 +52,8 @@ def generate_npcs(count, player):
                         collision = True
                         break
                 if not collision:
-                    personality_id = (i % 16) + 1  # 16 типов личности
-                    npc = NPC(corner[0], corner[1], i, personality_id)  # И здесь тоже добавляем personality_id
+                    personality_id = (i % 16) + 1
+                    npc = NPC(corner[0], corner[1], i, personality_id)
                     npcs.append(npc)
                     occupied_areas.append(corner_rect)
                     placed = True
@@ -70,7 +69,6 @@ def generate_items(count, player, npcs):
         pygame.Rect(0, 0, SCREEN_WIDTH, INVENTORY_HEIGHT),
     ]
 
-    # Добавляем NPC в занятые области
     for npc in npcs:
         occupied_areas.append(npc.rect)
 
@@ -84,7 +82,6 @@ def generate_items(count, player, npcs):
             y = random.randint(INVENTORY_HEIGHT + 10, SCREEN_HEIGHT - ITEM_SIZE)
             new_rect = pygame.Rect(x, y, ITEM_SIZE, ITEM_SIZE)
 
-            # Проверяем отступы от других объектов
             collision = False
             for area in occupied_areas:
                 if new_rect.colliderect(area.inflate(10, 10)):
@@ -100,7 +97,6 @@ def generate_items(count, player, npcs):
             attempts += 1
 
         if not placed:
-            # Альтернативное размещение в углах, если не найдено место
             corners = [
                 (10, INVENTORY_HEIGHT + 10),
                 (SCREEN_WIDTH - ITEM_SIZE - 10, INVENTORY_HEIGHT + 10),
@@ -135,8 +131,7 @@ def game_loop(screen, selected_personality):
 
     inventory_icon_rect = inventory_icon.get_rect(topleft=(10, 10))
 
-    # Инициализация игровых объектов
-    player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2, selected_personality)
     npcs = generate_npcs(15, player)
     items = generate_items(5, player, npcs)
 
@@ -148,122 +143,225 @@ def game_loop(screen, selected_personality):
     # Инициализация систем
     inventory_ui = InventoryUI(inventory_icon_rect.width)
     dialogue_system = DialogueSystem()
-    
+
     # Состояния игры
     inventory_open = False
     running = True
     clock = pygame.time.Clock()
+    conquered_npcs = []  # Храним id завоеванных NPC
+    current_character = player  # Текущий управляемый персонаж
+    controlled_npcs = {}  # Словарь управляемых NPC {id: character}
 
     while running:
         # Обработка событий
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            
-            # Обработка клавиатуры
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return "menu"
+
                 if event.key == pygame.K_i:
                     inventory_open = not inventory_open
                     inventory_ui.visible = inventory_open
-                
-                # Обработка диалогов только при нажатии (не зажатии)
-                if event.key == pygame.K_SPACE:
-                    closest_npc = None
-                    min_distance = DIALOGUE_RADIUS  # Используем константу радиуса
-                    
-                    # Находим ближайшего NPC в радиусе взаимодействия
-                    for npc in npcs:
-                        # Рассчитываем расстояние между центрами
-                        distance = ((player.rect.centerx - npc.rect.centerx)**2 + 
-                                  (player.rect.centery - npc.rect.centery)**2)**0.5
+
+                # Переключение между персонажами по Tab
+                if event.key == pygame.K_TAB and len(conquered_npcs) > 0:
+                    if current_character == player:
+                        # Переключаемся на NPC
+                        # Находим ближайшего завоеванного NPC, который еще не управляется
+                        closest_npc = None
+                        min_distance = float('inf')
                         
+                        for npc in npcs:
+                            if (npc.personality_id in conquered_npcs and 
+                                npc.personality_id not in controlled_npcs):
+                                
+                                distance = (
+                                    (player.rect.centerx - npc.rect.centerx)**2 + 
+                                    (player.rect.centery - npc.rect.centery)**2
+                                )**0.5
+                                
+                                if distance < min_distance:
+                                    min_distance = distance
+                                    closest_npc = npc
+                        
+                        if closest_npc:
+                            # Создаем управляемого персонажа на основе NPC
+                            npc_personality = next(
+                                (p for p in dialogue_system.personalities 
+                                if p["id"] == closest_npc.personality_id), None
+                            )
+                            
+                            if npc_personality:
+                                new_char = Player(
+                                    closest_npc.rect.x,
+                                    closest_npc.rect.y,
+                                    npc_personality
+                                )
+                                new_char.inventory = player.inventory.copy()
+                                controlled_npcs[closest_npc.personality_id] = new_char
+                                all_sprites.add(new_char)
+                                current_character = new_char
+                    else:
+                        # Возвращаемся к игроку
+                        current_character = player
+
+                # Взаимодействие только для основного персонажа
+                if event.key == pygame.K_SPACE and current_character == player:
+                    closest_npc = None
+                    min_distance = DIALOGUE_RADIUS
+
+                    # Ищем ближайшего NPC, который еще не завоеван
+                    for npc in npcs:
+                        if npc.personality_id in conquered_npcs:
+                            continue
+
+                        distance = (
+                            (player.rect.centerx - npc.rect.centerx) ** 2
+                            + (player.rect.centery - npc.rect.centery) ** 2
+                        ) ** 0.5
                         if distance <= min_distance:
                             min_distance = distance
                             closest_npc = npc
-                    
-                    # Если нашли NPC для взаимодействия
-                    if closest_npc:
-                        dialogue_system.toggle_dialogue(closest_npc.personality_id)
-            
+
+                    if closest_npc and closest_npc.personality_id not in conquered_npcs:
+                        if not dialogue_system.dialogue_visible:
+                            dialogue_system.start_dialogue(closest_npc)
+                            dialogue_system.start_guessing()
+                        elif dialogue_system.guessing_mode:
+                            if dialogue_system.check_guess():
+                                conquered_id = closest_npc.personality_id
+                                if conquered_id not in conquered_npcs:
+                                    conquered_npcs.append(conquered_id)
+                                    dialogue_system.close_dialogue()
+
             # Обработка кликов мыши
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if inventory_icon_rect.collidepoint(event.pos):
+                if dialogue_system.guessing_mode:
+                    dialogue_system.handle_guess_click(event.pos)
+                elif inventory_icon_rect.collidepoint(event.pos):
                     inventory_open = not inventory_open
                     inventory_ui.visible = inventory_open
-            
+
             # Обработка инвентаря
             if inventory_open:
                 inventory_ui.handle_events(
-                    event, 
-                    player.inventory, 
-                    player, 
+                    event,
+                    current_character.inventory,
+                    current_character,
                     all_sprites,
                     npc_group,
                     item_group,
                     SCREEN_WIDTH,
-                    SCREEN_HEIGHT
+                    SCREEN_HEIGHT,
                 )
 
-        # Обновление игрока
+        # Обновление текущего персонажа
         keys = pygame.key.get_pressed()
-        player.update(keys)
+        current_character.update(keys)
 
-        # Обновление диалоговой системы (проверка расстояния до NPC)
-        dialogue_system.update(player, npcs)
-        
-        
-        # Ограничение движения (не заходить в зону инвентаря)
-        if player.rect.top < INVENTORY_PANEL_HEIGHT:
-            player.rect.top = INVENTORY_PANEL_HEIGHT
+        # Ограничение движения для всех управляемых персонажей
+        for char in [player] + list(controlled_npcs.values()):
+            if char.rect.top < INVENTORY_PANEL_HEIGHT:
+                char.rect.top = INVENTORY_PANEL_HEIGHT
 
-        # Проверка столкновений с NPC
+        # Проверка столкновений
         for npc in npcs:
-            if player.rect.colliderect(npc.rect):
-                player.rect.x = player.prev_x
-                player.rect.y = player.prev_y
+            if current_character.rect.colliderect(npc.rect):
+                current_character.rect.x = current_character.prev_x
+                current_character.rect.y = current_character.prev_y
 
         # Сбор предметов
-        collected_items = pygame.sprite.spritecollide(player, item_group, False)
+        collected_items = pygame.sprite.spritecollide(
+            current_character, item_group, False
+        )
         for item in collected_items:
-            if not getattr(item, 'dragging', False):
-                player.collect_item(item)
+            if not getattr(item, "dragging", False):
+                current_character.collect_item(item)
                 item.kill()
+
+        # Проверка расстояния для автоматического закрытия диалога
+        if dialogue_system.dialogue_visible and dialogue_system.current_npc:
+            distance = (
+                (
+                    current_character.rect.centerx
+                    - dialogue_system.current_npc.rect.centerx
+                )
+                ** 2
+                + (
+                    current_character.rect.centery
+                    - dialogue_system.current_npc.rect.centery
+                )
+                ** 2
+            ) ** 0.5
+            if distance > DIALOGUE_RADIUS:
+                dialogue_system.close_dialogue()
 
         # Отрисовка
         screen.fill(WHITE)
-        
+
         # Рисуем игровой мир
         for sprite in all_sprites:
-            if not (isinstance(sprite, Item) and getattr(sprite, 'dragging', False)):
+            if not (isinstance(sprite, Item) and getattr(sprite, "dragging", False)):
                 screen.blit(sprite.image, sprite.rect)
-        
-        # Рисуем перетаскиваемый предмет (если есть)
-        if hasattr(inventory_ui, 'dragged_item') and inventory_ui.dragged_item:
+
+        # Рисуем перетаскиваемый предмет
+        if hasattr(inventory_ui, "dragged_item") and inventory_ui.dragged_item:
             dragged_item = inventory_ui.dragged_item
-            # Ограничиваем позицию в пределах экрана
-            dragged_item.rect.x = max(0, min(dragged_item.rect.x, SCREEN_WIDTH - dragged_item.rect.width))
-            dragged_item.rect.y = max(INVENTORY_PANEL_HEIGHT, min(dragged_item.rect.y, SCREEN_HEIGHT - dragged_item.rect.height))
+            dragged_item.rect.x = max(
+                0, min(dragged_item.rect.x, SCREEN_WIDTH - dragged_item.rect.width)
+            )
+            dragged_item.rect.y = max(
+                INVENTORY_PANEL_HEIGHT,
+                min(dragged_item.rect.y, SCREEN_HEIGHT - dragged_item.rect.height),
+            )
             screen.blit(dragged_item.image, dragged_item.rect)
-        
-        # Рисуем индикаторы взаимодействия с NPC
+
+        # Рисуем индикаторы взаимодействия
         for npc in npcs:
-            distance = ((player.rect.centerx - npc.rect.centerx)**2 + 
-                       (player.rect.centery - npc.rect.centery)**2)**0.5
+            distance = (
+                (current_character.rect.centerx - npc.rect.centerx) ** 2
+                + (current_character.rect.centery - npc.rect.centery) ** 2
+            ) ** 0.5
             if distance <= DIALOGUE_RADIUS:
-                # Индикатор доступного диалога
-                pygame.draw.circle(screen, (100, 255, 100), 
-                                 (npc.rect.centerx, npc.rect.top - 15), 8)
-        
+                if npc.personality_id in conquered_npcs:
+                    # Индикатор для завоеванных NPC (синий с TAB)
+                    pygame.draw.circle(
+                        screen,
+                        (100, 100, 255),
+                        (npc.rect.centerx, npc.rect.top - 15),
+                        8,
+                    )
+                    tab_text = font_small.render("TAB", True, WHITE)
+                    screen.blit(
+                        tab_text,
+                        (
+                            npc.rect.centerx - tab_text.get_width() // 2,
+                            npc.rect.top - 30,
+                        ),
+                    )
+                elif current_character == player and npc.personality_id not in conquered_npcs:
+                    # Индикатор для новых NPC (зеленый)
+                    pygame.draw.circle(
+                        screen,
+                        (100, 255, 100),
+                        (npc.rect.centerx, npc.rect.top - 15),
+                        8,
+                    )
+
         # Рисуем интерфейс
         screen.blit(inventory_icon, inventory_icon_rect)
         if inventory_open:
-            inventory_ui.draw(screen, player.inventory, 
-                            inventory_icon_rect.right + 10, 
-                            inventory_icon_rect.top)
-        
-        # Рисуем диалоговую систему поверх всего
+            inventory_ui.draw(
+                screen,
+                current_character.inventory,
+                inventory_icon_rect.right + 10,
+                inventory_icon_rect.top,
+            )
+
+        # Рисуем диалоговую систему
         dialogue_system.draw(screen)
 
         pygame.display.flip()

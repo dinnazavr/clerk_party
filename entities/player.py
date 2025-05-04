@@ -2,10 +2,9 @@ import pygame
 from constants import *
 
 class Player(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, personality=None):
         super().__init__()
         self.image = pygame.Surface((30, 50))
-        self.image.fill((8, 8, 8))
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
@@ -13,6 +12,13 @@ class Player(pygame.sprite.Sprite):
         self.prev_x = x
         self.prev_y = y
         self.inventory = []  # Список собранных предметов
+        self.personality = personality  # Сохраняем личность персонажа
+        
+        # Устанавливаем цвет в зависимости от личности
+        if personality and "color" in personality:
+            self.image.fill(personality["color"])
+        else:
+            self.image.fill((8, 8, 8))  # Цвет по умолчанию
 
     def update(self, keys):
         self.prev_x = self.rect.x
@@ -30,6 +36,7 @@ class Player(pygame.sprite.Sprite):
         # Жесткое ограничение границ
         self.rect.x = max(0, min(self.rect.x, SCREEN_WIDTH - self.rect.width))
         self.rect.y = max(0, min(self.rect.y, SCREEN_HEIGHT - self.rect.height))
+        
     def collect_item(self, item):
         self.inventory.append(item)
         item.kill()  # Удаляем предмет из игрового мира

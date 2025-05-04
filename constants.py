@@ -10,10 +10,14 @@ pygame.display.set_caption("Clerk Party")
 # Цвета
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GRAY = (200, 200, 200) 
+GRAY = (200, 200, 200)
 LIGHT_GRAY = (230, 230, 230)
-BLUE = (100, 150, 255)
-DARK_BLUE = (70, 100, 200)
+DARK_GRAY = (100, 100, 100)
+BLUE = (0, 0, 255)
+DARK_BLUE = (0, 0, 139)
+LIGHT_BLUE = (173, 216, 230)
+GREEN = (0, 255, 0) 
+RED = (255, 0, 0)   
 COLORS = [
     (255, 0, 0),
     (0, 255, 0),
